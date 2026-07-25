@@ -1,17 +1,17 @@
 #include <circle/startup.h>
-#include <circle/actled.h>
 #include <circle/koptions.h>
 #include <circle/device.h>
+#include <circle/devicenameservice.h> // Required header
+#include <circle/2dgraphics.h>
+#include <circle/screen.h>
 #include <circle/logger.h>
 #include <circle/types.h>
 
-// Minimal QEMU-compatible serial device deriving directly from CDevice
 class CQemuSerialDevice : public CDevice
 {
 public:
     CQemuSerialDevice(void) {}
 
-    // Pure virtual overrides from CDevice
     int Write(const void *pBuffer, size_t nCount) override
     {
         volatile unsigned int * const UART0_DR = (unsigned int *)0xFE201000;
@@ -20,7 +20,6 @@ public:
         const char *pChar = (const char *)pBuffer;
         for (size_t i = 0; i < nCount; i++)
         {
-            // Wait while TX FIFO is full (bit 5)
             while (*UART0_FR & (1 << 5))
             {
                 asm volatile("nop");
@@ -30,10 +29,7 @@ public:
         return (int)nCount;
     }
 
-    int Read(void *pBuffer, size_t nCount) override
-    {
-        return -1; // Read not implemented
-    }
+    int Read(void *pBuffer, size_t nCount) override { return -1; }
 };
 
 class CKernel
@@ -41,44 +37,66 @@ class CKernel
 public:
     CKernel(void)
         : m_Options(),
+          m_DeviceNameService(),
+          m_Graphics(m_Options.GetWidth(), m_Options.GetHeight()),
           m_Serial(),
-          m_Logger(m_Options.GetLogLevel(), nullptr) // nullptr timer for polled logging
+          m_Logger(m_Options.GetLogLevel(), nullptr)
     {
     }
 
     bool Initialize(void)
     {
-        // Attach our custom QEMU serial writer to Circle's CLogger
-        if (!m_Logger.Initialize(&m_Serial))
+        if (!m_Logger.Initialize(&m_Serial)) return false;
+
+        m_Logger.Write("CKernel", LogNotice, "Initializing C2DGraphics...");
+
+        // Initialize the graphics subsystem and underlying framebuffer
+        if (!m_Graphics.Initialize())
         {
-            return false;
+            m_Logger.Write("CKernel", LogError, "C2DGraphics failed to initialize!");
         }
+        
         return true;
     }
 
     void Run(void)
     {
-        m_Logger.Write("CKernel", LogNotice, "========================================");
-        m_Logger.Write("CKernel", LogNotice, "  Circle Subsystem Initialized (QEMU)!  ");
-        m_Logger.Write("CKernel", LogNotice, "  Running on Raspberry Pi 4 (AArch64)   ");
-        m_Logger.Write("CKernel", LogNotice, "========================================");
+        T2DColor bgColor   = (T2DColor)0xFF000080; // Dark Blue
+        T2DColor redColor  = (T2DColor)0xFFFF0000; // Solid Red
+        T2DColor textColor = (T2DColor)0xFFFFFFFF; // White
+
+        // 1. Clear the screen to a background color (ARGB hex format)
+        m_Graphics.ClearScreen(bgColor);
+
+        // 2. Draw a solid red rectangle in the top right
+        unsigned rectWidth = 100;
+        unsigned rectHeight = 100;
+        unsigned startX = m_Graphics.GetWidth() - rectWidth - 20;
+        unsigned startY = 20;
+        
+        // C2DGraphics provides standard primitive functions
+        m_Graphics.DrawRect(startX, startY, rectWidth, rectHeight, redColor);
+
+        // 3. Draw text natively using Circle's built-in font renderer
+        m_Graphics.DrawText(20, 20, textColor, "Circle C2DGraphics Engine Online!");
+
+        // 4. Swap buffers (pushes the drawn frame to the screen)
+        m_Graphics.UpdateDisplay();
 
         unsigned nCounter = 0;
         while (1)
         {
-            m_Logger.Write("CKernel", LogNotice, "Heartbeat tick: %u", nCounter++);
-
-            for (volatile int i = 0; i < 20000000; i++)
-            {
-                asm volatile("nop");
-            }
+            //m_Logger.Write("CKernel", LogNotice, "Heartbeat tick: %u", nCounter++);
+            for (volatile int i = 0; i < 20000000; i++) asm volatile("nop");
         }
     }
 
 private:
-    CKernelOptions    m_Options;
-    CQemuSerialDevice m_Serial;
-    CLogger           m_Logger;
+    CKernelOptions     m_Options;
+    CDeviceNameService m_DeviceNameService; // Declared BEFORE m_Screen
+    C2DGraphics        m_Graphics;
+    CQemuSerialDevice  m_Serial;
+    CLogger            m_Logger;
 };
 
 int main(void)

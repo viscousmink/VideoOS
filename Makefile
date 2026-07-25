@@ -8,7 +8,14 @@ TARGET = kernel8
 OBJS = src/main.o
 
 # Core Circle library required for boot, memory management, and drivers
-LIBS = $(CIRCLEHOME)/lib/libcircle.a
+LIBS = $(CIRCLEHOME)/addon/vc4/vchiq/libvchiq.a \
+       $(CIRCLEHOME)/addon/vc4/sound/libvchiqsound.a \
+       $(CIRCLEHOME)/addon/linux/liblinuxemu.a \
+       $(CIRCLEHOME)/lib/libcircle.a
+
+# Include directories for VC4/VC6 display drivers and Khronos interfaces
+DEFINE += -I $(CIRCLEHOME)/addon/vc4 \
+          -I $(CIRCLEHOME)/addon/vc4/interface/khronos/include
 
 # Compiler flags for Raspberry Pi 4 (Cortex-A72)
 CXXFLAGS += -mcpu=cortex-a72 -DUSE_PL011_SERIAL
