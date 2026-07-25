@@ -1,11 +1,19 @@
 #include <circle/startup.h>
 #include <circle/koptions.h>
 #include <circle/device.h>
-#include <circle/devicenameservice.h> // Required header
+#include <circle/devicenameservice.h>
 #include <circle/2dgraphics.h>
-#include <circle/screen.h>
 #include <circle/logger.h>
 #include <circle/types.h>
+
+// File system and hardware includes
+#include <circle/interrupt.h>
+#include <circle/timer.h>
+#include <SDCard/emmc.h>       // Correct EMMC Header
+#include <circle/fs/fat/fatfs.h>       // Correct FATFS Header
+#include <fatfs/ff.h>
+
+#include <stdint.h>
 
 class CQemuSerialDevice : public CDevice
 {
@@ -20,15 +28,11 @@ public:
         const char *pChar = (const char *)pBuffer;
         for (size_t i = 0; i < nCount; i++)
         {
-            while (*UART0_FR & (1 << 5))
-            {
-                asm volatile("nop");
-            }
+            while (*UART0_FR & (1 << 5)) { asm volatile("nop"); }
             *UART0_DR = pChar[i];
         }
         return (int)nCount;
     }
-
     int Read(void *pBuffer, size_t nCount) override { return -1; }
 };
 
@@ -40,7 +44,10 @@ public:
           m_DeviceNameService(),
           m_Graphics(m_Options.GetWidth(), m_Options.GetHeight()),
           m_Serial(),
-          m_Logger(m_Options.GetLogLevel(), nullptr)
+          m_Logger(m_Options.GetLogLevel(), nullptr),
+          m_Interrupt(),
+          m_Timer(&m_Interrupt),
+          m_EMMC(&m_Interrupt, &m_Timer)
     {
     }
 
@@ -48,65 +55,129 @@ public:
     {
         if (!m_Logger.Initialize(&m_Serial)) return false;
 
-        m_Logger.Write("CKernel", LogNotice, "Initializing C2DGraphics...");
+        m_Interrupt.Initialize();
+        m_Timer.Initialize();
+        m_Graphics.Initialize();
 
-        // Initialize the graphics subsystem and underlying framebuffer
-        if (!m_Graphics.Initialize())
+        m_Logger.Write("CKernel", LogNotice, "Initializing SD Card...");
+        
+        if (!m_EMMC.Initialize())
         {
-            m_Logger.Write("CKernel", LogError, "C2DGraphics failed to initialize!");
+            m_Logger.Write("CKernel", LogError, "EMMC (SD Card) initialization failed!");
+        }
+        else
+        {
+            m_Logger.Write("CKernel", LogNotice, "FAT File System Mounted Successfully!");
         }
         
         return true;
     }
 
+    void DrawBMP(const char* filename, unsigned startX, unsigned startY)
+    {
+        FIL file;
+        
+        // f_open replaces fopen
+        FRESULT res = f_open(&file, "SD:/image.bmp", FA_READ);
+        if (res != FR_OK)
+        {
+            m_Logger.Write("CKernel", LogError, "Could not open %s (Error %d)", filename, res);
+            return;
+        }
+
+        uint8_t header[54];
+        UINT bytesRead;
+        
+        // f_read replaces fread
+        f_read(&file, header, 54, &bytesRead);
+        
+        if (bytesRead != 54 || header[0] != 'B' || header[1] != 'M')
+        {
+            m_Logger.Write("CKernel", LogError, "Invalid BMP file");
+            f_close(&file);
+            return;
+        }
+
+        uint32_t dataOffset = *(uint32_t*)&header[10];
+        uint32_t width      = *(uint32_t*)&header[18];
+        int32_t  height     = *(int32_t*)&header[22];
+        uint16_t bpp        = *(uint16_t*)&header[28];
+
+        if (bpp != 24)
+        {
+            m_Logger.Write("CKernel", LogError, "Only 24-bit BMPs are supported");
+            f_close(&file);
+            return;
+        }
+
+        // f_lseek replaces fseek
+        f_lseek(&file, dataOffset);
+        
+        uint32_t rowPadding = (4 - (width * 3) % 4) % 4;
+        uint8_t* rowBuffer = new uint8_t[width * 3 + rowPadding];
+
+        for (int y = height - 1; y >= 0; y--)
+        {
+            f_read(&file, rowBuffer, width * 3 + rowPadding, &bytesRead);
+            
+            for (unsigned x = 0; x < width; x++)
+            {
+                uint8_t b = rowBuffer[x * 3 + 0];
+                uint8_t g = rowBuffer[x * 3 + 1];
+                uint8_t r = rowBuffer[x * 3 + 2];
+                
+                T2DColor color = (T2DColor)(0xFF000000 | (r << 16) | (g << 8) | b);
+                m_Graphics.DrawPixel(startX + x, startY + y, color);
+            }
+        }
+
+        delete[] rowBuffer;
+        
+        // f_close replaces fclose
+        f_close(&file);
+        m_Logger.Write("CKernel", LogNotice, "BMP drawn successfully!");
+    }
+
     void Run(void)
     {
-        T2DColor bgColor   = (T2DColor)0xFF000080; // Dark Blue
-        T2DColor redColor  = (T2DColor)0xFFFF0000; // Solid Red
-        T2DColor textColor = (T2DColor)0xFFFFFFFF; // White
-
-        // 1. Clear the screen to a background color (ARGB hex format)
-        m_Graphics.ClearScreen(bgColor);
-
-        // 2. Draw a solid red rectangle in the top right
-        unsigned rectWidth = 100;
-        unsigned rectHeight = 100;
-        unsigned startX = m_Graphics.GetWidth() - rectWidth - 20;
-        unsigned startY = 20;
+        // Paint screen Dark Gray using standard DrawPixel loop
+        T2DColor bgColor = (T2DColor)0xFF202020;
+        for (unsigned y = 0; y < m_Graphics.GetHeight(); y++)
+        {
+            for (unsigned x = 0; x < m_Graphics.GetWidth(); x++)
+            {
+                m_Graphics.DrawPixel(x, y, bgColor);
+            }
+        }
         
-        // C2DGraphics provides standard primitive functions
-        m_Graphics.DrawRect(startX, startY, rectWidth, rectHeight, redColor);
-
-        // 3. Draw text natively using Circle's built-in font renderer
-        m_Graphics.DrawText(20, 20, textColor, "Circle C2DGraphics Engine Online!");
-
-        // 4. Swap buffers (pushes the drawn frame to the screen)
+        m_Graphics.DrawText(20, 20, (T2DColor)0xFFFFFFFF, "Searching for image.bmp on SD Card...");
         m_Graphics.UpdateDisplay();
 
-        unsigned nCounter = 0;
-        while (1)
-        {
-            //m_Logger.Write("CKernel", LogNotice, "Heartbeat tick: %u", nCounter++);
-            for (volatile int i = 0; i < 20000000; i++) asm volatile("nop");
-        }
+        // Decode and draw the image!
+        DrawBMP("image.bmp", 50, 60);
+        
+        m_Graphics.UpdateDisplay();
+
+        while (1) { asm volatile("nop"); }
     }
 
 private:
     CKernelOptions     m_Options;
-    CDeviceNameService m_DeviceNameService; // Declared BEFORE m_Screen
+    CDeviceNameService m_DeviceNameService;
     C2DGraphics        m_Graphics;
     CQemuSerialDevice  m_Serial;
     CLogger            m_Logger;
+    
+    CInterruptSystem   m_Interrupt;
+    CTimer             m_Timer;
+    CEMMCDevice        m_EMMC;
+    FATFS              m_FileSystem;
 };
 
 int main(void)
 {
     CKernel Kernel;
-    if (Kernel.Initialize())
-    {
-        Kernel.Run();
-    }
-
+    if (Kernel.Initialize()) { Kernel.Run(); }
     return 0;
 }
 

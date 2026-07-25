@@ -1,33 +1,14 @@
 #!/usr/bin/env bash
 set -e
 
-# Configuration
-IMAGE_NAME="sd.img"
-IMAGE_SIZE_MB=64
-TEST_FILE="video.mp4"
+# 1. Create a 1GB sparse blank image
+dd if=/dev/zero of=sd.img bs=1M count=0 seek=1024
 
-echo "==> Creating ${IMAGE_SIZE_MB}MB blank image..."
-dd if=/dev/zero of="${IMAGE_NAME}" bs=1M count=${IMAGE_SIZE_MB} status=progress
+# 2. Partition it with an MBR table (Fat32 starting at 1MB offset)
+parted -s sd.img mktable msdos mkpart primary fat32 1MiB 100%
 
-echo "==> Formatting ${IMAGE_NAME} as FAT32..."
-mkfs.vfat -F 32 "${IMAGE_NAME}"
+# 3. Format Partition 1 as FAT32
+mformat -i "sd.img@@1048576" -F ::
 
-echo "==> Creating dummy '${TEST_FILE}' file..."
-# Creates a non-empty 1MB dummy file so Circle reads actual data blocks
-dd if=/dev/urandom of="tmp_${TEST_FILE}" bs=1M count=1 status=none
-
-echo "==> Copying '${TEST_FILE}' onto SD image root..."
-# Ensure mtools is installed
-if ! command -v mcopy &> /dev/null; then
-    echo "Error: 'mtools' is not installed. Run 'sudo apt install mtools' first."
-    rm -f "tmp_${TEST_FILE}"
-    exit 1
-fi
-
-mcopy -i "${IMAGE_NAME}" "tmp_${TEST_FILE}" "::${TEST_FILE}"
-rm -f "tmp_${TEST_FILE}"
-
-echo "==> Verifying SD image contents:"
-mdir -i "${IMAGE_NAME}" ::
-
-echo "==> Done! '${IMAGE_NAME}' is ready for QEMU."
+# 4. Copy the image into the root directory
+mcopy -i "sd.img@@1048576" image.bmp ::IMAGE.BMP

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-# Exit immediately if kernel8.img doesn't exist
 if [ ! -f "kernel8.img" ]; then
     echo "Error: kernel8.img not found! Run 'make' first."
     exit 1
@@ -13,15 +12,13 @@ QEMU_CMD=(
     -smp 4
     -kernel kernel8.img
     -serial stdio
+    # Mount the raw FAT32 block image instead of the virtual folder
+    -drive file=sd.img,format=raw,if=sd
 )
 
-# Pass -d or --debug to freeze QEMU for GDB attachment on port 1234
 if [[ "$1" == "-d" || "$1" == "--debug" ]]; then
-    echo "Starting QEMU in GDB debug mode (waiting for target remote :1234)..."
+    echo "Starting QEMU in GDB debug mode..."
     QEMU_CMD+=(-s -S)
-else
-    echo "Starting QEMU..."
 fi
 
-# Run QEMU
 "${QEMU_CMD[@]}"
