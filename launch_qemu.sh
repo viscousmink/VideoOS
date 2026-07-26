@@ -6,19 +6,7 @@ if [ ! -f "kernel8.img" ]; then
 fi
 
 QEMU_CMD=(
-    qemu-system-aarch64
-    -M raspi4b
-    -m 2G
-    -smp 4
-    -kernel kernel8.img
-    -serial stdio
-    # Mount the raw FAT32 block image instead of the virtual folder
-    -drive file=sd.img,format=raw,if=sd
+    qemu-system-aarch64 -M raspi4b -m 2G -kernel kernel8.img -serial stdio
 )
-
-if [[ "$1" == "-d" || "$1" == "--debug" ]]; then
-    echo "Starting QEMU in GDB debug mode..."
-    QEMU_CMD+=(-s -S)
-fi
 
 "${QEMU_CMD[@]}"

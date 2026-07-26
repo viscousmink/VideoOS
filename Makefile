@@ -13,12 +13,15 @@ LIBS = $(CIRCLEHOME)/addon/fatfs/libfatfs.a \
        $(CIRCLEHOME)/addon/linux/liblinuxemu.a \
        $(CIRCLEHOME)/lib/libcircle.a
 
-# Include directories
+# Include directories and Target Defines (Pi 3 / 64-bit)
 DEFINE += -I $(CIRCLEHOME)/addon/vc4 \
           -I $(CIRCLEHOME)/addon/vc4/interface/khronos/include \
           -I $(CIRCLEHOME)/addon/SDCard \
-          -I $(CIRCLEHOME)/addon/fatfs
+          -I $(CIRCLEHOME)/addon/fatfs \
+          -DAARCH=64 \
+          -DSDHOST_DEF_EMMC
 
+# Compiler flags targeting Raspberry Pi 3 (Cortex-A53)w
 CXXFLAGS += -mcpu=cortex-a72 -DUSE_PL011_SERIAL
 CFLAGS   += -mcpu=cortex-a72
 
