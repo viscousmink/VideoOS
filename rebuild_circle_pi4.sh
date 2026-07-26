@@ -34,17 +34,8 @@ if [ "${RECONFIG}" -eq 1 ]; then
     rm -f Config.mk Config.old
 fi
 
-echo "==> Configuring Circle for Pi 4 (64-bit + QEMU)..."
-./configure -r 4 -p "aarch64-none-elf-" -d AARCH=64 --qemu -f
-
-# CRITICAL: Force DEPTH = 32 inside Config.mk after configure generates it
-echo "==> Forcing 32 bpp color depth in Config.mk..."
-if grep -q "^DEPTH" Config.mk; then
-    sed -i 's/^DEPTH.*/DEPTH = 32/' Config.mk
-else
-    # Add -DDEPTH=32 directly to C preprocessor flags in Config.mk
-    echo "DEFINES += -DDEPTH=32" >> Config.mk
-fi
+echo "==> Configuring Circle for Pi 4 (64-bit + QEMU with 32 bpp)..."
+./configure -r 4 -p "aarch64-none-elf-" -d AARCH=64 --qemu --multicore -f
 
 echo "==> Rebuilding Circle libraries (32 bpp)..."
 ./makeall -j20

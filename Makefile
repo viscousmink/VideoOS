@@ -21,9 +21,21 @@ DEFINE += -I $(CIRCLEHOME)/addon/vc4 \
           -DAARCH=64 \
           -DSDHOST_DEF_EMMC
 
+# Add POSIX threads addon from Circle
+ADDON_DIR += tools/circle/addon/pthreads
+
+ARM_ALLOW_MULTI_CORE = 1
+
+# Ensure defines are set for threading and stdlib
+DEFINES += -DSTDLIB_SUPPORT=1 -DWAIT_USE_STI
+
 # Compiler flags targeting Raspberry Pi 3 (Cortex-A53)w
 CXXFLAGS += -mcpu=cortex-a72 -DUSE_PL011_SERIAL
 CFLAGS   += -mcpu=cortex-a72
+
+# Add the pre-compiled multicore object directly to the linker invocation
+OBJS += tools/circle/lib/multicore.o \
+        tools/circle/lib/spinlock.o
 
 include $(CIRCLEHOME)/Rules.mk
 
